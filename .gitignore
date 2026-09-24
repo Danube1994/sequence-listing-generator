@@ -1,0 +1,15 @@
+# PyInstaller build artifacts
+build/
+dist/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Runtime-generated user config (symbol legends), not source code
+symbol_legend.json
+aa_symbol_legend.json
+
+# Excel/Word lock files
+~$*.xlsx
+~$*.docx
