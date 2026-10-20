@@ -7,7 +7,7 @@
 ）解析成结构化的逐残基修饰事件（0b），再按项目约定的规则渲染成
 现有流水线（模块1-7）认识的 flat modification_text（0c）。
 
-语法（用 <> 标出的四类符号全部可以通过 GUI 里的"符号定义"界面配置，
+语法（用 <> 标出的四类符号全部可以通过 GUI 里的"核苷酸符号定义"界面配置，
 默认值就是下面示例里的样子，符号本身和含义都可以改，语法结构——谁是
 前缀、谁是后缀、方括号包裹接头名——不可改）：
     <vp_prefix_symbol>? ([ACGU]<residue_modifier>?<ps_link_symbol>?)+ (\\[linker名\\])?
@@ -117,7 +117,7 @@ def parse_compact_notation(notation, row_name, config=None):
             raise NotationParseError(
                 row_name,
                 f"位置 {pos} 附近出现无法识别的字符: {text[pos:m.start()]!r}"
-                "（如果是新符号，需要先在符号定义里添加）",
+                "（如果是新符号，需要先在核苷酸符号定义里添加）",
                 notation,
             )
         base, sugar, s = m.group(1), m.group(2), m.group(3)
@@ -134,7 +134,7 @@ def parse_compact_notation(notation, row_name, config=None):
         raise NotationParseError(
             row_name,
             f"记法末尾出现无法识别的字符: {text[pos:]!r}"
-            "（如果是新符号，需要先在符号定义里添加）",
+            "（如果是新符号，需要先在核苷酸符号定义里添加）",
             notation,
         )
     if not residues:
@@ -196,7 +196,7 @@ def render_modification_text(decoded, config=None):
                 # 属于调用方用法问题，报错而不是猜。
                 raise NotationParseError(
                     decoded.row_name,
-                    f"符号 {r.sugar_mod!r} 在当前符号定义里没有对应的说明文字",
+                    f"符号 {r.sugar_mod!r} 在当前核苷酸符号定义里没有对应的说明文字",
                 )
             clauses.append(_modified_base_clause(r.position, note_text))
         if r.ps_link_to_next:

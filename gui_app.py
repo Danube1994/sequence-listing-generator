@@ -8,8 +8,8 @@ ST.26 序列表 XML 生成工具（桌面 GUI）
               不需要用户自己判断该用哪个（核苷酸专用格式，氨基酸目前
               只支持 Word 输入）
     Word   -> 先看记法内容自动判断这是核苷酸紧凑记法还是氨基酸连字符
-              记法（_is_aa_notation_docx），再分别按"符号定义"/"氨基酸
-              符号定义"里配置的规则解析（模块0 / 模块0b）。两条记法
+              记法（_is_aa_notation_docx），再分别按"核苷酸符号定义"/
+              "氨基酸符号定义"里配置的规则解析（模块0 / 模块0b）。两条记法
               语法互斥，判断依据见 _is_aa_notation_docx 的说明。
 - 点"生成 XML"：跑完整条流水线，校验通过就弹出保存对话框导出 XML；
   有问题就在日志区列出来，并可以导出成 Excel 校验报告
@@ -18,7 +18,7 @@ Annex I 参照表（Table 1-4）已经内嵌在 annex_i_data.py 里，不需要�
 再单独选择/上传，界面上也就不再放这个入口。
 
 不重新实现校验/生成逻辑，全部复用已经测试过的模块：
-    核苷酸紧凑记法解析 -> module0.records_from_docx（"符号定义"配置）
+    核苷酸紧凑记法解析 -> module0.records_from_docx（"核苷酸符号定义"配置）
     核苷酸格式探测/适配 -> adapter_merged_block_reader
     核苷酸校验流水线   -> module7.run_full_validation（内部串了模块1-4，
                           缺省就用内嵌的 Annex I 数据）
@@ -178,7 +178,7 @@ def run_pipeline(path, log):
 
 class SymbolLegendDialog(tk.Toplevel):
     """
-    "符号定义"界面：模块0紧凑记法解析器里全部符号的可视化编辑器，分两块：
+    "核苷酸符号定义"界面：模块0紧凑记法解析器里全部符号的可视化编辑器，分两块：
 
     1. 残基修饰符号表（可以一直加行）：每行两个输入框，符号（比如 m）
        + 说明（比如 2'-O-methoxy modification (2'-OMe)）。
@@ -194,7 +194,7 @@ class SymbolLegendDialog(tk.Toplevel):
 
     def __init__(self, master):
         super().__init__(master)
-        self.title("符号定义")
+        self.title("核苷酸符号定义")
         self.geometry("560x600")
         self.transient(master)
         self.grab_set()
@@ -299,7 +299,7 @@ class SymbolLegendDialog(tk.Toplevel):
 
     def on_add_row(self):
         if len(self.row_widgets) >= MAX_ENTRIES:
-            messagebox.showwarning("提示", f"最多只能有 {MAX_ENTRIES} 条符号定义")
+            messagebox.showwarning("提示", f"最多只能有 {MAX_ENTRIES} 条核苷酸符号定义")
             return
         self._add_row("", "")
         self._update_count_label()
@@ -745,8 +745,6 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("ST.26 序列表 XML 生成工具")
-        self.geometry("700x500")
-        self.minsize(600, 400)
 
         self.source_path = tk.StringVar()
         self.last_issues = []
@@ -762,18 +760,26 @@ class App(tk.Tk):
 
         btn_frm = tk.Frame(self, pady=6)
         btn_frm.pack()
-        self.gen_btn = tk.Button(btn_frm, text="生成 XML", width=20, command=self.on_generate)
+        self.gen_btn = tk.Button(btn_frm, text="生成 XML", width=16, command=self.on_generate)
         self.gen_btn.pack(side="left", padx=5)
-        self.report_btn = tk.Button(btn_frm, text="导出校验报告", width=20,
+        self.report_btn = tk.Button(btn_frm, text="导出校验报告", width=16,
                                      command=self.on_export_report, state="disabled")
         self.report_btn.pack(side="left", padx=5)
-        tk.Button(btn_frm, text="符号定义...", width=20,
-                  command=self.on_edit_symbol_legend).pack(side="left", padx=5)
-        tk.Button(btn_frm, text="氨基酸符号定义...", width=20,
+        # 两个符号定义按钮跟前面两个操作按钮之间留一段间隔，视觉上分成两组
+        tk.Button(btn_frm, text="核苷酸符号定义...", width=16,
+                  command=self.on_edit_symbol_legend).pack(side="left", padx=(25, 5))
+        tk.Button(btn_frm, text="氨基酸符号定义...", width=16,
                   command=self.on_edit_aa_symbol_legend).pack(side="left", padx=5)
 
         self.log_area = scrolledtext.ScrolledText(self, width=80, height=20)
         self.log_area.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # 窗口宽度按实际内容算，不写死：高分屏缩放下按钮会比固定像素宽度
+        # 更宽，写死 700 会把最右边的按钮截掉。
+        self.update_idletasks()
+        width = max(700, self.winfo_reqwidth())
+        self.geometry(f"{width}x520")
+        self.minsize(width, 400)
 
     def log(self, msg):
         self.log_area.insert("end", str(msg) + "\n")
