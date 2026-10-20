@@ -50,7 +50,7 @@ from aa_symbol_legend import load_config
 from annex_i_data import AMINO_ACID_SYMBOLS
 from module0_compact_notation import NotationParseError
 
-_MAIN_TOKEN_RE = re.compile(r"^([A-Za-z0-9]+)(?:\((.*)\))?$")
+_MAIN_TOKEN_RE = re.compile(r"^([^()\s]+)(?:\((.*)\))?$")
 
 
 def _standard_code_to_letter():
@@ -205,7 +205,7 @@ def parse_aa_notation(notation, row_name, config=None):
             raise NotationParseError(
                 row_name,
                 f"位置 {i + 1} 的记法 {token!r} 不符合语法"
-                "（应该是字母数字缩写，可选跟一个圆括号）",
+                "（应该是不含空格和括号的缩写，可选跟一个圆括号；检查是否多了空格）",
                 raw,
             )
         base_part, bracket_part = m.group(1), m.group(2)
