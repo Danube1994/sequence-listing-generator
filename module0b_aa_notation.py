@@ -37,6 +37,15 @@ X）。带圆括号支链的标准残基（比如 Lys(...)）仍然按它自己�
 处理（Lys -> K），因为圆括号语法本身不改变主链残基是谁，只是额外
 挂了一段支链说明。
 
+一个残基后面可以跟多个圆括号（比如 "Cys(γGlu)(-CH2-)"）。每个括号按
+内容分类：和"氨基酸符号定义"里桥连接定义表某一行"起点写法"一致的是桥
+的起点，和"终点写法"一致的是桥的终点，其余是上面说的接头/偶联支链。
+起点和终点按出现顺序一一配对（每个终点配它前面最早没配对、终点写法
+一致的起点），配成一对就生成一条 CROSSLNK/DISULFID 特征（位置 x..y，
+note 按定义表的模板生成，{aa1}/{aa2} 是起点/终点残基的三字母代码）。
+桥只能挂在标准三字母残基上；对不上的起点/终点、同一个残基带多个接头
+支链，都直接报错。
+
 语法之外的任何残留字符（未登记的缩写、圆括号内容里不认识的片段、
 缺分隔符等）一律报错，不静默跳过、不猜测——这套记法是给机器读的，
 出现语法之外的情况大概率是数据录入错误，或者是符号定义里还没收录
@@ -50,7 +59,8 @@ from aa_symbol_legend import load_config
 from annex_i_data import AMINO_ACID_SYMBOLS
 from module0_compact_notation import NotationParseError
 
-_MAIN_TOKEN_RE = re.compile(r"^([^()\s]+)(?:\((.*)\))?$")
+_MAIN_TOKEN_RE = re.compile(r"^([^()\s]+)((?:\([^()]*\))*)$")
+_GROUP_RE = re.compile(r"\(([^()]*)\)")
 
 
 def _standard_code_to_letter():
@@ -119,10 +129,19 @@ class DecodedAAResidue:
 
 
 @dataclass
+class DecodedAACrosslink:
+    start: int
+    end: int
+    key: str       # CROSSLNK 或 DISULFID
+    note: str
+
+
+@dataclass
 class DecodedAASequence:
     row_name: str
     raw_notation: str
     residues: list = field(default_factory=list)
+    crosslinks: list = field(default_factory=list)   # List[DecodedAACrosslink]
 
     @property
     def bare_sequence(self):
@@ -198,24 +217,43 @@ def parse_aa_notation(notation, row_name, config=None):
     if not tokens:
         raise NotationParseError(row_name, "没有解析出任何残基", raw)
 
+    bridges = config.get("bridges", [])
+    opener_map = {b["opener"]: b for b in bridges}
+    closer_texts = {b["closer"] for b in bridges}
+    pending_openers = []   # 还没配上终点的桥起点
+    crosslinks = []
+
     residues = []
     for i, token in enumerate(tokens):
+        position = i + 1
         m = _MAIN_TOKEN_RE.match(token)
         if not m:
             raise NotationParseError(
                 row_name,
-                f"位置 {i + 1} 的记法 {token!r} 不符合语法"
-                "（应该是不含空格和括号的缩写，可选跟一个圆括号；检查是否多了空格）",
+                f"位置 {position} 的记法 {token!r} 不符合语法"
+                "（应该是不含空格和括号的缩写，可选跟若干个圆括号；检查是否多了空格）",
                 raw,
             )
-        base_part, bracket_part = m.group(1), m.group(2)
+        base_part = m.group(1)
+        groups = _GROUP_RE.findall(m.group(2))
         note = None
 
+        # 每个括号按内容分类：桥起点 / 桥终点 / 接头支链
+        bridge_events = []      # [("open", bridge) 或 ("close", 终点写法)]
+        conjugate_groups = []
+        for g in groups:
+            if g in opener_map:
+                bridge_events.append(("open", opener_map[g]))
+            elif g in closer_texts:
+                bridge_events.append(("close", g))
+            else:
+                conjugate_groups.append(g)
+
         if base_part in abbreviations:
-            if bracket_part is not None:
+            if groups:
                 raise NotationParseError(
                     row_name,
-                    f"位置 {i + 1} 的 {base_part!r} 既是非标准缩写又带了圆括号，"
+                    f"位置 {position} 的 {base_part!r} 既是非标准缩写又带了圆括号，"
                     "这种组合目前没有规则可依，需要人工确认",
                     raw,
                 )
@@ -224,11 +262,51 @@ def parse_aa_notation(notation, row_name, config=None):
             note = entry["note"]
         elif base_part in code_to_letter:
             base_letter = code_to_letter[base_part]
-            if bracket_part is not None:
+            if len(conjugate_groups) > 1:
+                raise NotationParseError(
+                    row_name,
+                    f"位置 {position} 的 {base_part!r} 带了 {len(conjugate_groups)} 个接头/偶联"
+                    "支链括号，同一个残基带多个支链目前没有规则可依，需要人工确认",
+                    raw,
+                )
+            if conjugate_groups:
                 bracket_note = _render_bracket_content(
-                    bracket_part, row_name, raw, config, bracket_token_re
+                    conjugate_groups[0], row_name, raw, config, bracket_token_re
                 )
                 note = f"{base_part}({bracket_note})"
+
+            for kind, value in bridge_events:
+                if kind == "open":
+                    pending_openers.append({"bridge": value, "start": position, "aa": base_part})
+                    continue
+                idx = next(
+                    (k for k, p in enumerate(pending_openers)
+                     if p["bridge"]["closer"] == value and p["start"] != position),
+                    None,
+                )
+                if idx is None:
+                    raise NotationParseError(
+                        row_name,
+                        f"位置 {position} 的桥连接终点 ({value}) 前面没有还没配对、"
+                        "终点写法一致的起点（终点必须出现在起点后面，也不能跟起点在同一个残基上）",
+                        raw,
+                    )
+                opener = pending_openers.pop(idx)
+                try:
+                    bridge_note = opener["bridge"]["note"].format(
+                        aa1=opener["aa"], aa2=base_part
+                    )
+                except (KeyError, IndexError, ValueError) as e:
+                    raise NotationParseError(
+                        row_name,
+                        f"桥连接 {opener['bridge']['opener']!r} 的 note 模板无法使用"
+                        f"（{e!r}），只支持 {{aa1}}、{{aa2}} 两个占位符",
+                        raw,
+                    )
+                crosslinks.append(DecodedAACrosslink(
+                    start=opener["start"], end=position,
+                    key=opener["bridge"]["key"], note=bridge_note,
+                ))
         else:
             raise NotationParseError(
                 row_name,
@@ -251,7 +329,18 @@ def parse_aa_notation(notation, row_name, config=None):
         template = config["terminal_suffix_note_template"]
         residues[-1].notes.append(template.format(name=last_name))
 
-    return DecodedAASequence(row_name=row_name, raw_notation=raw, residues=residues)
+    if pending_openers:
+        p = pending_openers[0]
+        raise NotationParseError(
+            row_name,
+            f"位置 {p['start']} 的桥连接起点 ({p['bridge']['opener']}) 后面没有找到对应的终点 "
+            f"({p['bridge']['closer']})",
+            raw,
+        )
+
+    return DecodedAASequence(
+        row_name=row_name, raw_notation=raw, residues=residues, crosslinks=crosslinks
+    )
 
 
 def load_aa_notation_table(docx_path, table_index=0):

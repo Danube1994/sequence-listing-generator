@@ -37,7 +37,7 @@ import threading
 import traceback
 import xml.etree.ElementTree as ET
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -349,7 +349,8 @@ class SymbolLegendDialog(tk.Toplevel):
 class AASymbolLegendDialog(tk.Toplevel):
     """
     "氨基酸符号定义"界面：氨基酸紧凑记法解析器（模块0b）里全部符号的
-    可视化编辑器，对应 aa_symbol_legend.py 的配置结构，分四块：
+    可视化编辑器，对应 aa_symbol_legend.py 的配置结构，分五块（第5块
+    "桥连接定义"见下面最后的说明）：
 
     1. 残基修饰缩写表（可以一直加行）：每行三个输入框，缩写（比如
        Aib）+ 完整修饰名称/note（比如 2-Aminoisobutyric acid）+
@@ -362,6 +363,9 @@ class AASymbolLegendDialog(tk.Toplevel):
        对应英文单词，比如 γ -> gamma。
     4. 接头/偶联片段名单（可以一直加行，只有一列）：圆括号子语法里
        允许出现的、本身不是氨基酸的片段名称，比如 AEEA、Eic、PEG-2。
+
+    5. 桥连接定义（可以一直加行，每行四项）：起点写法、终点写法、特征键
+       （CROSSLNK 或 DISULFID）、note 模板（支持 {aa1}/{aa2}）。
 
     整个对话框内容放进一个可滚动区域，保存/取消按钮固定在底部不随
     内容滚动。保存时校验通过才写盘、关闭窗口，不通过就地提示、不
@@ -495,6 +499,42 @@ class AASymbolLegendDialog(tk.Toplevel):
         self.fragment_count_label.pack(side="left", padx=5)
         self._update_fragment_count_label()
 
+        # ---- 5. 桥连接定义 ----
+        tk.Label(content, text="桥连接定义", anchor="w", font=("", 9, "bold"),
+                 padx=10).pack(fill="x", pady=(10, 0))
+        tk.Label(
+            content,
+            text="一个残基后面的圆括号内容和\"起点写法\"一致就是桥的起点，和\"终点写法\"一致就是桥的终点，"
+                 "按出现顺序一一配对。桥两端之间的基团（亚甲基、亚乙基……）不同就各占一行，靠起点写法区分。"
+                 "note 模板里可以用 {aa1}/{aa2}，分别代入起点/终点残基的三字母代码。",
+            fg="#666", padx=10, anchor="w", justify="left", wraplength=640,
+        ).pack(fill="x")
+
+        bridge_header = tk.Frame(content, padx=10)
+        bridge_header.pack(fill="x", pady=(4, 0))
+        tk.Label(bridge_header, text="起点写法", width=11, anchor="w", font=("", 9, "bold")).pack(side="left")
+        tk.Label(bridge_header, text="终点写法", width=9, anchor="w", font=("", 9, "bold")).pack(side="left")
+        tk.Label(bridge_header, text="特征键", width=12, anchor="w", font=("", 9, "bold")).pack(side="left")
+        tk.Label(bridge_header, text="note 模板", anchor="w", font=("", 9, "bold")).pack(side="left")
+
+        self.bridge_rows_frame = tk.Frame(content)
+        self.bridge_rows_frame.pack(fill="x", padx=10, pady=5)
+        self.bridge_rows = []  # List[(opener_entry, closer_entry, key_combo, note_entry)]
+
+        for b in config["bridges"]:
+            self._add_bridge_row(b["opener"], b["closer"], b["key"], b["note"])
+        while len(self.bridge_rows) < aa_symbol_legend.BRIDGE_MIN_BLANK_SLOTS:
+            self._add_bridge_row()
+
+        bridge_btn_frm = tk.Frame(content, pady=4)
+        bridge_btn_frm.pack()
+        self.bridge_add_btn = tk.Button(bridge_btn_frm, text="添加一行", width=14,
+                                         command=self.on_add_bridge_row)
+        self.bridge_add_btn.pack(side="left", padx=5)
+        self.bridge_count_label = tk.Label(bridge_btn_frm, fg="#666")
+        self.bridge_count_label.pack(side="left", padx=5)
+        self._update_bridge_count_label()
+
         # ---- 底部按钮（不随内容滚动）----
         btn_frm = tk.Frame(self, pady=8)
         btn_frm.pack(side="bottom")
@@ -579,6 +619,38 @@ class AASymbolLegendDialog(tk.Toplevel):
         self._add_fragment_row()
         self._update_fragment_count_label()
 
+    # ---- 桥连接定义 ----
+
+    def _add_bridge_row(self, opener="", closer="", key="CROSSLNK", note=""):
+        row = tk.Frame(self.bridge_rows_frame)
+        row.pack(fill="x", pady=1)
+        opener_entry = tk.Entry(row, width=11)
+        opener_entry.insert(0, opener)
+        opener_entry.pack(side="left")
+        closer_entry = tk.Entry(row, width=9)
+        closer_entry.insert(0, closer)
+        closer_entry.pack(side="left", padx=(4, 0))
+        key_combo = ttk.Combobox(row, values=aa_symbol_legend.BRIDGE_KEYS, width=10, state="readonly")
+        key_combo.set(key if key in aa_symbol_legend.BRIDGE_KEYS else aa_symbol_legend.BRIDGE_KEYS[0])
+        key_combo.pack(side="left", padx=(4, 0))
+        note_entry = tk.Entry(row)
+        note_entry.insert(0, note)
+        note_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        self.bridge_rows.append((opener_entry, closer_entry, key_combo, note_entry))
+
+    def _update_bridge_count_label(self):
+        self.bridge_count_label.config(text=f"当前 {len(self.bridge_rows)} / {aa_symbol_legend.MAX_ENTRIES} 行")
+        self.bridge_add_btn.config(
+            state="disabled" if len(self.bridge_rows) >= aa_symbol_legend.MAX_ENTRIES else "normal"
+        )
+
+    def on_add_bridge_row(self):
+        if len(self.bridge_rows) >= aa_symbol_legend.MAX_ENTRIES:
+            messagebox.showwarning("提示", f"最多只能有 {aa_symbol_legend.MAX_ENTRIES} 条桥连接定义")
+            return
+        self._add_bridge_row()
+        self._update_bridge_count_label()
+
     # ---- 保存 ----
 
     def on_save(self):
@@ -627,12 +699,30 @@ class AASymbolLegendDialog(tk.Toplevel):
             seen_fragments.add(frag)
             conjugate_fragments.append(frag)
 
+        bridges = []
+        seen_openers = set()
+        for opener_entry, closer_entry, key_combo, note_entry in self.bridge_rows:
+            opener = opener_entry.get().strip()
+            closer = closer_entry.get().strip()
+            note = note_entry.get().strip()
+            if not opener and not closer and not note:
+                continue  # 整行空白（特征键下拉框有默认值，不算填写），跳过
+            if not opener or not closer or not note:
+                messagebox.showerror("错误", "桥连接的起点写法、终点写法、note 模板必须同时填写，不能只填一部分")
+                return
+            if opener in seen_openers:
+                messagebox.showerror("错误", f"桥连接起点写法 {opener!r} 重复定义了")
+                return
+            seen_openers.add(opener)
+            bridges.append({"opener": opener, "closer": closer, "key": key_combo.get(), "note": note})
+
         config = {
             "residue_abbreviations": residue_abbreviations,
             "terminal_suffix_symbol": self.suffix_symbol_entry.get().strip(),
             "terminal_suffix_note_template": self.suffix_template_entry.get().strip(),
             "greek_letter_words": greek_letter_words,
             "conjugate_fragments": conjugate_fragments,
+            "bridges": bridges,
         }
 
         try:
@@ -645,7 +735,8 @@ class AASymbolLegendDialog(tk.Toplevel):
         messagebox.showinfo(
             "完成",
             f"已保存 {len(residue_abbreviations)} 条残基修饰缩写 + 末端后缀符号 + "
-            f"{len(greek_letter_words)} 条希腊字母替换 + {len(conjugate_fragments)} 条接头片段名单",
+            f"{len(greek_letter_words)} 条希腊字母替换 + {len(conjugate_fragments)} 条接头片段名单 + "
+            f"{len(bridges)} 条桥连接定义",
         )
         self.destroy()
 

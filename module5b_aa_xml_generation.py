@@ -19,6 +19,10 @@
   逻辑——DecodedAAResidue.notes 列表里的每一条 note，各自独立生成
   一个 INSDFeature，互不合并，即使同一位置有多条（比如末端残基自身
   带修饰、又叠加了末端酰胺化说明）也是两个独立的 MOD_RES。
+- 桥连接（模块0b 解析出的 DecodedAACrosslink）生成 CROSSLNK/DISULFID
+  特征，location 是 "x..y"（标准 7.9/7.10 节），同样只带一个 note。
+  全部特征按 location 排序：先按起始位置，同一起始位置上单点的
+  MOD_RES 排在 x..y 的桥连接前面。
 - INSDSeq_moltype 固定 "AA"。
 """
 
@@ -47,13 +51,30 @@ def build_aa_source_feature(length):
     return feature
 
 
-def build_aa_mod_res_feature(position, note):
+def build_aa_feature(key, location, note):
     feature = ET.Element("INSDFeature")
-    ET.SubElement(feature, "INSDFeature_key").text = MOD_RES_KEY
-    ET.SubElement(feature, "INSDFeature_location").text = str(position)
+    ET.SubElement(feature, "INSDFeature_key").text = key
+    ET.SubElement(feature, "INSDFeature_location").text = location
     quals = ET.SubElement(feature, "INSDFeature_quals")
     _add_qualifier(quals, "note", note)
     return feature
+
+
+def _ordered_features(decoded):
+    """
+    返回按 location 排好序的 [(key, location, note), ...]。排序键是
+    (起始位置, 结束位置)：同一个起始位置上，单点特征（MOD_RES，结束
+    位置等于起始位置）自然排在跨位置的特征（CROSSLNK/DISULFID 的
+    x..y）前面；完全同键的特征保持原来的出现顺序（sorted 是稳定排序）。
+    """
+    entries = []
+    for residue in decoded.residues:
+        for note in residue.notes:
+            entries.append((residue.position, residue.position, MOD_RES_KEY, str(residue.position), note))
+    for link in decoded.crosslinks:
+        entries.append((link.start, link.end, link.key, f"{link.start}..{link.end}", link.note))
+    entries.sort(key=lambda e: (e[0], e[1]))
+    return [(key, location, note) for _s, _e, key, location, note in entries]
 
 
 def build_aa_insdseq(decoded):
@@ -67,9 +88,8 @@ def build_aa_insdseq(decoded):
 
     feature_table = ET.SubElement(insdseq, "INSDSeq_feature-table")
     feature_table.append(build_aa_source_feature(len(bare_sequence)))
-    for residue in decoded.residues:
-        for note in residue.notes:
-            feature_table.append(build_aa_mod_res_feature(residue.position, note))
+    for key, location, note in _ordered_features(decoded):
+        feature_table.append(build_aa_feature(key, location, note))
 
     ET.SubElement(insdseq, "INSDSeq_sequence").text = bare_sequence
     return insdseq
